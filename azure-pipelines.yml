@@ -1,19 +1,82 @@
-# Starter pipeline
-# Start with a minimal pipeline that you can customize to build and deploy your code.
-# Add steps that build, run tests, deploy, and more:
-# https://aka.ms/yaml
 
 trigger:
-- main
+  - main
+  - azure-pipelines
 
 pool:
   vmImage: ubuntu-latest
 
-steps:
-- script: echo Hello, world!
-  displayName: 'Run a one-line script'
+variables:
+  pythonVersion: '3.12'
+  webAppName: 'WEB_APP'
+  environmentName: 'web-app-dev'
 
-- script: |
-    echo Add other tasks to build, test, and deploy your project.
-    echo See https://aka.ms/yaml
-  displayName: 'Run a multi-line script'
+stages:
+
+# STAGE 1: BUILD AND TEST
+- stage: Build
+  displayName: 'Build and Test Flask App'
+
+  jobs:
+  - job: BuildJob
+    displayName: 'Install, Test and Package'
+
+    steps:
+    - checkout: self
+
+    - task: UsePythonVersion@0
+      displayName: 'Select Python version'
+      inputs:
+        versionSpec: '$(pythonVersion)'
+
+    - script: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+      displayName: 'Install dependencies'
+
+    - script: |
+        python -c "from main import app; r = app.test_client().get('/'); assert r.status_code == 200; assert b'Hello, Azure!' in r.data; print('Smoke test passed')"
+      displayName: 'Test Flask homepage'
+
+    - task: ArchiveFiles@2
+      displayName: 'Package application'
+      inputs:
+        rootFolderOrFile: '$(Build.SourcesDirectory)'
+        includeRootFolder: false
+        archiveType: zip
+        archiveFile: '$(Build.ArtifactStagingDirectory)/web-app.zip'
+        replaceExistingArchive: true
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish build artifact'
+      inputs:
+        targetPath: '$(Build.ArtifactStagingDirectory)/web-app.zip'
+        artifact: 'drop'
+
+# STAGE 2: DEPLOY TO AZURE
+- stage: Deploy
+  displayName: 'Deploy Flask App'
+  dependsOn: Build
+  condition: succeeded()
+
+  jobs:
+  - deployment: DeployWebApp
+    displayName: 'Deploy to Development'
+    environment: 'web-app-dev'
+
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+            artifact: drop
+
+          - task: AzureWebApp@1
+            displayName: 'Deploy to Azure App Service'
+            inputs:
+              azureSubscription: 'YOUR-AZURE-SERVICE-CONNECTION'
+              appType: webAppLinux
+              appName: '$(webAppName)'
+              package: '$(Pipeline.Workspace)/drop/web-app.zip'
+              runtimeStack: 'PYTHON|3.12'
+              startUpCommand: 'gunicorn --bind=0.0.0.0 --timeout 600 main:app'
