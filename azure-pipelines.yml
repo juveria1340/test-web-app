@@ -8,7 +8,7 @@ pool:
 
 variables:
   pythonVersion: '3.12'
-  webAppName: 'WEB_APP'
+  webAppName: 'flask-demo-yourinitials-2026'
   environmentName: 'web-app-dev'
 
 stages:
